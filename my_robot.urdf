@@ -1,0 +1,149 @@
+<?xml version="1.0"?>
+<robot name="my_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- ======================== -->
+  <!--       BASE (Chassis)    -->
+  <!-- ======================== -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <!-- Chassis mesh scaled appropriately -->
+        <mesh filename="package://my_robot_description/meshes/chassis.dae" scale="0.3 0.3 0.3"/>
+      </geometry>
+      <material name="dark_gray">
+        <color rgba="0.2 0.2 0.2 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://my_robot_description/meshes/chassis.dae" scale="0.3 0.3 0.3"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- ======================== -->
+  <!--    REALSENSE SENSOR     -->
+  <!-- ======================== -->
+  <link name="realsense_link">
+    <visual>
+      <geometry>
+        <!-- Replace with your RealSense mesh; adjust scale as needed -->
+        <mesh filename="package://my_robot_description/meshes/realsense.dae" scale="0.1 0.1 0.1"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://my_robot_description/meshes/realsense.dae" scale="0.1 0.1 0.1"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Fixed joint mounting the RealSense on top of the chassis -->
+  <joint name="joint_realsense" type="fixed">
+    <parent link="base_link"/>
+    <child link="realsense_link"/>
+    <!-- Adjust these offsets so that the RealSense sits in the proper location (e.g., on top center) -->
+    <origin xyz="0 0 0.3" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ======================== -->
+  <!--         WHEELS         -->
+  <!-- ======================== -->
+
+  <!-- Wheel Front Left -->
+  <link name="wheel_front_left">
+    <visual>
+      <geometry>
+        <mesh filename="package://my_robot_description/meshes/wheel_front_left.dae" scale="0.3 0.3 0.3"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://my_robot_description/meshes/wheel_front_left.dae" scale="0.3 0.3 0.3"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_wheel_front_left" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_front_left"/>
+    <!-- Place the front-left wheel at an offset relative to the chassis center -->
+    <origin xyz="0.4 0.25 -0.2" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- Wheel Front Right -->
+  <link name="wheel_front_right">
+    <visual>
+      <geometry>
+        <mesh filename="package://my_robot_description/meshes/wheel_front_right.dae" scale="0.3 0.3 0.3"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://my_robot_description/meshes/wheel_front_right.dae" scale="0.3 0.3 0.3"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_wheel_front_right" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_front_right"/>
+    <origin xyz="0.4 -0.25 -0.2" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- Wheel Rear Left -->
+  <link name="wheel_rear_left">
+    <visual>
+      <geometry>
+        <mesh filename="package://my_robot_description/meshes/wheel_rear_left.dae" scale="0.3 0.3 0.3"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://my_robot_description/meshes/wheel_rear_left.dae" scale="0.3 0.3 0.3"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_wheel_rear_left" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_rear_left"/>
+    <origin xyz="-0.4 0.25 -0.2" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+  <!-- Wheel Rear Right -->
+  <link name="wheel_rear_right">
+    <visual>
+      <geometry>
+        <mesh filename="package://my_robot_description/meshes/wheel_rear_right.dae" scale="0.3 0.3 0.3"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0.1 0.1 0.1 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <mesh filename="package://my_robot_description/meshes/wheel_rear_right.dae" scale="0.3 0.3 0.3"/>
+      </geometry>
+    </collision>
+  </link>
+  <joint name="joint_wheel_rear_right" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_rear_right"/>
+    <origin xyz="-0.4 -0.25 -0.2" rpy="0 0 0"/>
+    <axis xyz="0 1 0"/>
+  </joint>
+
+</robot>
