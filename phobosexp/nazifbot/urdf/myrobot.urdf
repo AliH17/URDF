@@ -48,7 +48,7 @@
       <origin rpy="1.57080 0.00000 0.00000" xyz="0.00000 0.00000 0.00000"/>
       <material name="191,191,191.007"/>
       <geometry>
-        <mesh filename="../meshes/dae/NEW DESIGN Straight.dae" scale="0.02663 0.02663 0.02663"/>
+        <mesh filename="package://my_robot/meshes/dae/NEW DESIGN Straight.dae" scale="0.02663 0.02663 0.02663"/>
       </geometry>
     </visual>
   </link>
@@ -79,7 +79,7 @@
       <origin rpy="0.00000 0.00000 -3.14159" xyz="-0.00000 -0.00000 0.00000"/>
       <material name="mat0.002"/>
       <geometry>
-        <mesh filename="../meshes/dae/obj8.004.dae" scale="-0.04184 -0.04184 -0.04184"/>
+        <mesh filename="package://my_robot/meshes/dae/obj8.004.dae" scale="-0.04184 -0.04184 -0.04184"/>
       </geometry>
     </visual>
   </link>
@@ -99,7 +99,7 @@
       <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00000 -0.00000 0.00000"/>
       <material name="Nuovo_1.002"/>
       <geometry>
-        <mesh filename="../meshes/dae/wheel_front_left.dae" scale="28.03236 28.03236 28.03236"/>
+        <mesh filename="package://my_robot/meshes/dae/wheel_front_left.dae" scale="28.03236 28.03236 28.03236"/>
       </geometry>
     </visual>
   </link>
@@ -119,7 +119,7 @@
       <origin rpy="0.00000 0.00000 0.00000" xyz="0.00000 0.00000 0.00000"/>
       <material name="Nuovo_1.002"/>
       <geometry>
-        <mesh filename="../meshes/dae/wheel_front_right.dae" scale="28.03236 28.03236 28.03236"/>
+        <mesh filename="package://my_robot/meshes/dae/wheel_front_right.dae" scale="28.03236 28.03236 28.03236"/>
       </geometry>
     </visual>
   </link>
@@ -139,7 +139,7 @@
       <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00000 -0.00000 0.00000"/>
       <material name="Nuovo_1.002"/>
       <geometry>
-        <mesh filename="../meshes/dae/wheel_rear_left.dae" scale="28.03236 28.03236 28.03236"/>
+        <mesh filename="package://my_robot/meshes/dae/wheel_rear_left.dae" scale="28.03236 28.03236 28.03236"/>
       </geometry>
     </visual>
   </link>
@@ -159,7 +159,7 @@
       <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00000 0.00000 -0.00000"/>
       <material name="Nuovo_1.002"/>
       <geometry>
-        <mesh filename="../meshes/dae/wheel_rear_right.001.dae" scale="28.03236 28.03236 28.03236"/>
+        <mesh filename="package://my_robot/meshes/dae/wheel_rear_right.001.dae" scale="28.03236 28.03236 28.03236"/>
       </geometry>
     </visual>
   </link>
