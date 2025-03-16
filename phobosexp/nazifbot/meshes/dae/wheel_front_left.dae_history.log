@@ -1,3 +1,0 @@
-Instantiated with filepath=None->None, scale=[28.032358169555664, 28.032358169555664, 28.032358169555664], mesh=<bpy_struct, Mesh("wheel_front_left") at 0x000002BA7DE7F588>, meshname=wheel_front_left, material=None, mesh_orientation=None, {}
-->trying export of <bpy_struct, Mesh("wheel_front_left") at 0x000002BA7DE7F588> to C:\Users\narji\Desktop\erc\phobosexp\nazifbot\meshes\dae\wheel_front_left.dae
-->wrote dae to C:\Users\narji\Desktop\erc\phobosexp\nazifbot\meshes\dae\wheel_front_left.dae from bpy_types.Mesh
