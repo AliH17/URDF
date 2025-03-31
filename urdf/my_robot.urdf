@@ -1,175 +1,211 @@
-<robot name="nazifbot" version="1.0">
-  <joint name="obj8.004_link_joint" type="fixed">
-    <origin rpy="0.00000 0.00000 1.57080" xyz="7.54713 0.00000 10.52073"/>
-    <parent link="chasis_link"/>
-    <child link="obj8.004_link"/>
+
+<?xml version="1.0"?>
+<robot name="my_robot" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Base Link (Main Body) -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.6 0.6 0.55"/>  <!-- 60cm x 60cm x 55cm -->
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.5 1.0 1.0"/>  <!-- Blue Color -->
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.6 0.6 0.55"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <!-- Dummy Link to Fix KDL Inertia Issue -->
+  <link name="dummy_link"/>
+  <joint name="base_joint" type="fixed">
+    <parent link="dummy_link"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 0"/>
   </joint>
-  <joint name="wheel_front_left_link_joint" type="continuous">
-    <limit lower="0" upper="0" effort="9.99000" velocity="10.44000"/>
-    <origin rpy="1.57080 0.00000 0.00000" xyz="6.13767 -8.60360 -5.95609"/>
-    <parent link="chasis_link"/>
-    <child link="wheel_front_left_link"/>
-    <axis xyz="0.00000 0.00000 1.00000"/>
+
+
+
+  <!-- Wheels: Changing joints to continuous for rotation -->
+  <!-- Front Left Wheel -->
+  <joint name="wheel_front_left_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_front_left"/>
+    <origin xyz="0.3 0.3 -0.275" rpy="1.5708 0 0"/>
+    <axis xyz="0 1 0"/>
   </joint>
-  <joint name="wheel_front_right_link_joint" type="continuous">
-    <limit lower="0" upper="0" effort="9.99000" velocity="10.44000"/>
-    <origin rpy="1.57080 0.00000 0.00000" xyz="6.13766 8.43827 -5.95614"/>
-    <parent link="chasis_link"/>
-    <child link="wheel_front_right_link"/>
-    <axis xyz="0.00000 0.00000 1.00000"/>
+  <link name="wheel_front_left">
+    <visual>
+      <geometry>
+        <cylinder radius="0.1" length="0.05"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Front Right Wheel -->
+  <joint name="wheel_front_right_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_front_right"/>
+    <origin xyz="0.3 -0.3 -0.275" rpy="1.5708 0 0"/>
+    <axis xyz="0 1 0"/>
   </joint>
-  <joint name="wheel_rear_left_link_joint" type="continuous">
-    <limit lower="0" upper="0" effort="9.99000" velocity="10.44000"/>
-    <origin rpy="1.57080 0.00000 0.00000" xyz="-9.19146 -8.60328 -5.95606"/>
-    <parent link="chasis_link"/>
-    <child link="wheel_rear_left_link"/>
-    <axis xyz="0.00000 0.00000 1.00000"/>
+  <link name="wheel_front_right">
+    <visual>
+      <geometry>
+        <cylinder radius="0.1" length="0.05"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Rear Left Wheel -->
+  <joint name="wheel_rear_left_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_rear_left"/>
+    <origin xyz="-0.3 0.3 -0.275" rpy="1.5708 0 0"/>
+    <axis xyz="0 1 0"/>
   </joint>
-  <joint name="wheel_rear_right_link_joint" type="continuous">
-    <limit lower="0" upper="0" effort="9.99000" velocity="10.44000"/>
-    <origin rpy="1.57080 0.00000 0.00000" xyz="-9.19136 8.43863 -5.95615"/>
-    <parent link="chasis_link"/>
-    <child link="wheel_rear_right_link"/>
-    <axis xyz="0.00000 0.00000 1.00000"/>
+  <link name="wheel_rear_left">
+    <visual>
+      <geometry>
+        <cylinder radius="0.1" length="0.05"/>
+      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1"/>
+      </material>
+    </visual>
+  </link>
+
+  <!-- Rear Right Wheel -->
+  <joint name="wheel_rear_right_joint" type="continuous">
+    <parent link="base_link"/>
+    <child link="wheel_rear_right"/>
+    <origin xyz="-0.3 -0.3 -0.275" rpy="1.5708 0 0"/>
+    <axis xyz="0 1 0"/>
   </joint>
-  <link name="chasis_link">
-    <collision name="chasis_collision">
-      <origin rpy="1.57080 0.00000 0.00000" xyz="1.55238 0.03876 3.30245"/>
+  <link name="wheel_rear_right">
+    <visual>
       <geometry>
-        <box size="15.77345 13.32786 14.73515"/>
+        <cylinder radius="0.1" length="0.05"/>
       </geometry>
-    </collision>
-    <inertial>
-      <inertia ixx="10092.28373" ixy="-89.75099" ixz="-2404.31453" iyy="11372.32481" iyz="-167.21397" izz="9416.63305"/>
-      <origin rpy="0.00000 0.00000 0.00000" xyz="0.00485 -0.03669 1.02978"/>
-      <mass value="7.32100"/>
-    </inertial>
-    <visual name="chasis">
-      <origin rpy="1.57080 0.00000 0.00000" xyz="0.00000 0.00000 0.00000"/>
-      <material name="191,191,191.007"/>
-      <geometry>
-        <mesh filename="package://my_robot/meshes/dae/NEW DESIGN Straight.dae" scale="0.02663 0.02663 0.02663"/>
-      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1"/>
+      </material>
     </visual>
   </link>
-  <link name="obj8.004_link">
-    <sensor name="intelrealsense" type="camera">
-      <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00000 -0.00000 0.00000"/>
-      <parent link="obj8.004_link"/>
-      <camera>
-        <image>
-          <width>640</width>
-          <height>480</height>
-          <hfov>1.57080</hfov>
-        </image>
-      </camera>
-    </sensor>
-    <collision name="obj8.004_collision">
-      <origin rpy="0.00000 0.00000 -3.14159" xyz="-0.00000 -0.51661 0.16906"/>
+
+<!-- Adding Arms to the Front of the Robot -->
+  <link name="arm_left">
+    <visual>
       <geometry>
-        <box size="5.94552 1.39047 1.25234"/>
+        <box size="0.2 0.05 0.05"/>  <!-- Arm extending forward -->
       </geometry>
-    </collision>
-    <inertial>
-      <inertia ixx="85.30160" ixy="-0.00002" ixz="-0.00000" iyy="8.01193" iyz="-0.00001" izz="84.46634"/>
-      <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00000 -0.00000 0.00001"/>
-      <mass value="1.44100"/>
-    </inertial>
-    <visual name="obj8.004">
-      <origin rpy="0.00000 0.00000 -3.14159" xyz="-0.00000 -0.00000 0.00000"/>
-      <material name="mat0.002"/>
-      <geometry>
-        <mesh filename="package://my_robot/meshes/dae/obj8.004.dae" scale="-0.04184 -0.04184 -0.04184"/>
-      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1.0"/>
+      </material>
     </visual>
   </link>
-  <link name="wheel_front_left_link">
-    <collision name="wheel_front_left_collision">
-      <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00292 -0.00311 0.01762"/>
+  <joint name="arm_left_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="arm_left"/>
+    <origin xyz="0.4 0.3 0" rpy="0 0 0"/>
+  </joint>
+
+  <link name="arm_right">
+    <visual>
       <geometry>
-        <cylinder radius="1.58749" length="1.58747"/>
+        <box size="0.2 0.05 0.05"/>  <!-- Arm extending forward -->
       </geometry>
-    </collision>
-    <inertial>
-      <inertia ixx="46.71538" ixy="-0.03750" ixz="-0.37545" iyy="75.73258" iyz="-0.03393" izz="46.41023"/>
-      <origin rpy="0.00000 0.00000 0.00000" xyz="0.00037 -0.00003 0.00003"/>
-      <mass value="2.58100"/>
-    </inertial>
-    <visual name="wheel_front_left">
-      <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00000 -0.00000 0.00000"/>
-      <material name="Nuovo_1.002"/>
-      <geometry>
-        <mesh filename="package://my_robot/meshes/dae/wheel_front_left.dae" scale="28.03236 28.03236 28.03236"/>
-      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1.0"/>
+      </material>
     </visual>
   </link>
-  <link name="wheel_front_right_link">
-    <collision name="wheel_front_right_collision">
-      <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00290 -0.00306 0.01783"/>
+  <joint name="arm_right_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="arm_right"/>
+    <origin xyz="0.4 -0.3 0" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Hanging Plane Sheets -->
+  <link name="sheet_left">
+    <visual>
       <geometry>
-        <cylinder radius="1.58749" length="1.58747"/>
+        <box size="0.15 0.01 0.15"/>  <!-- Hanging sheet -->
       </geometry>
-    </collision>
-    <inertial>
-      <inertia ixx="46.71511" ixy="-0.03747" ixz="-0.37548" iyy="75.73203" iyz="-0.03392" izz="46.40997"/>
-      <origin rpy="0.00000 0.00000 0.00000" xyz="0.00044 0.00021 0.00102"/>
-      <mass value="2.58100"/>
-    </inertial>
-    <visual name="wheel_front_right">
-      <origin rpy="0.00000 0.00000 0.00000" xyz="0.00000 0.00000 0.00000"/>
-      <material name="Nuovo_1.002"/>
-      <geometry>
-        <mesh filename="package://my_robot/meshes/dae/wheel_front_right.dae" scale="28.03236 28.03236 28.03236"/>
-      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1.0"/>
+      </material>
     </visual>
   </link>
-  <link name="wheel_rear_left_link">
-    <collision name="wheel_rear_left_collision">
-      <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00287 -0.00315 0.01761"/>
+  <joint name="sheet_left_joint" type="fixed">
+    <parent link="arm_left"/>
+    <child link="sheet_left"/>
+    <origin xyz="0.1 0 -0.075" rpy="0 0 0"/>
+  </joint>
+
+  <link name="sheet_right">
+    <visual>
       <geometry>
-        <cylinder radius="1.58747" length="1.58747"/>
+        <box size="0.15 0.01 0.15"/>  <!-- Hanging sheet -->
       </geometry>
-    </collision>
-    <inertial>
-      <inertia ixx="46.71527" ixy="-0.03753" ixz="-0.37541" iyy="75.73194" iyz="-0.03390" izz="46.40984"/>
-      <origin rpy="0.00000 0.00000 0.00000" xyz="0.00066 -0.00021 -0.00011"/>
-      <mass value="2.58100"/>
-    </inertial>
-    <visual name="wheel_rear_left">
-      <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00000 -0.00000 0.00000"/>
-      <material name="Nuovo_1.002"/>
-      <geometry>
-        <mesh filename="package://my_robot/meshes/dae/wheel_rear_left.dae" scale="28.03236 28.03236 28.03236"/>
-      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1.0"/>
+      </material>
     </visual>
   </link>
-  <link name="wheel_rear_right_link">
-    <collision name="wheel_rear_right_collision">
-      <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00296 -0.00305 0.01785"/>
+  <joint name="sheet_right_joint" type="fixed">
+    <parent link="arm_right"/>
+    <child link="sheet_right"/>
+    <origin xyz="0.1 0 -0.075" rpy="0 0 0"/>
+  </joint>
+
+  <!-- ===================================================== -->
+  <!--       CAMERA MOUNT and RealSense Sensor             -->
+  <!-- ===================================================== -->
+
+  <!-- Camera Mount: A simple mount on top of the chassis -->
+  <link name="camera_mount">
+    <visual>
       <geometry>
-        <cylinder radius="1.58747" length="1.58750"/>
+        <box size="0.1 0.1 0.05"/>  <!-- Simple box representation -->
       </geometry>
-    </collision>
-    <inertial>
-      <inertia ixx="46.71514" ixy="-0.03751" ixz="-0.37543" iyy="75.73179" iyz="-0.03391" izz="46.40966"/>
-      <origin rpy="0.00000 0.00000 0.00000" xyz="0.00021 0.00029 0.00114"/>
-      <mass value="2.58100"/>
-    </inertial>
-    <visual name="wheel_rear_right">
-      <origin rpy="0.00000 0.00000 0.00000" xyz="-0.00000 0.00000 -0.00000"/>
-      <material name="Nuovo_1.002"/>
-      <geometry>
-        <mesh filename="package://my_robot/meshes/dae/wheel_rear_right.001.dae" scale="28.03236 28.03236 28.03236"/>
-      </geometry>
+      <material name="gray">
+        <color rgba="0.5 0.5 0.5 1.0"/>
+      </material>
     </visual>
   </link>
-  <material name="191,191,191.007">
-    <color rgba="0.05882 0.05882 0.05882 1.00000"/>
-  </material>
-  <material name="Nuovo_1.002">
-    <color rgba="0.12157 0.06275 0.12941 1.00000"/>
-  </material>
-  <material name="mat0.002">
-    <color rgba="0.01569 0.01569 0.01569 1.00000"/>
-  </material>
+  <joint name="camera_mount_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="camera_mount"/>
+    <!-- Position the mount on top of the base; adjust as necessary -->
+    <origin xyz="0 0 0.35" rpy="0 0 0"/>
+  </joint>
+
+  <!-- RealSense Link: Use a primitive shape (box) for visualization -->
+  <link name="_camera_link">
+    <visual>
+      <geometry>
+        <box size="0.12 0.04 0.08"/>  <!-- Approximate dimensions of a D435i -->
+      </geometry>
+      <material name="black">
+        <color rgba="0 0 0 1.0"/>
+      </material>
+    </visual>
+  </link>
+  <joint name="realsense_joint" type="fixed">
+    <parent link="camera_mount"/>
+    <child link="_camera_link"/>
+    <!-- Position the sensor on the mount. Adjust xyz as needed for correct placement. -->
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+  </joint>
+
 </robot>
