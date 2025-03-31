@@ -15,5 +15,6 @@ ros2 launch my_robot robot.launch.py
 
 ## Launch files
 - my_realsense.launch.py launches the realsense d435i camera node.
--my_rtabmap launches rtabmap.
--robot.launch launches the robot description
+- my_rtabmap launches rtabmap.
+- robot.launch launches the robot description
+
