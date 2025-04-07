@@ -1,0 +1,729 @@
+#!/usr/bin/env python3
+import numpy as np
+if not hasattr(np, 'typeDict'):
+    np.typeDict = np.sctypeDict
+
+import pyrealsense2 as rs
+import cv2
+import math
+import matplotlib.pyplot as plt
+from collections import deque
+import time
+import threading
+from numba import njit
+import heapq
+from ultralytics import YOLO  # For bin detection
+import serial
+from concurrent.futures import ThreadPoolExecutor
+
+# -------------------------------
+# Debug & Fallback Flags and Parameters
+# -------------------------------
+DEBUG_VO = True  # Enable VO debug visualization.
+VO_TRANSLATION_MAX = 0.5  # Max allowed translation (m) between frames.
+
+# -------------------------------
+# Arduino Serial Communication
+# -------------------------------
+USE_ARDUINO = False  # Set True when Arduino is connected
+if USE_ARDUINO:
+    arduino = serial.Serial('/dev/ttyACM0', 9600, timeout=1)  # Update port as needed
+    time.sleep(2)
+else:
+    arduino = None
+
+# -------------------------------
+# Safety Mechanism: Command Delay & Timeout
+# -------------------------------
+# Global flag to track the last command time
+last_command_time = time.time()
+
+def send_motor_command(command):
+    """Send a command string to the Arduino (or simulate it), enforcing a 3-second delay between commands."""
+    global last_command_time
+    # Enforce a 3-second delay between commands
+    elapsed = time.time() - last_command_time
+    if elapsed < 3:
+        time.sleep(3 - elapsed)
+    print("Sending command:", command)
+    last_command_time = time.time()  # Update timestamp on each command
+    if USE_ARDUINO and arduino is not None:
+        arduino.write((command + "\n").encode())
+
+def monitor_timeout(timeout=5):
+    """Monitor and stop motors if no command is sent within timeout period."""
+    global last_command_time
+    while True:
+        if time.time() - last_command_time > timeout:
+            print("[TIMEOUT] No command received in {} seconds. Stopping motors.".format(timeout))
+            send_motor_command("stop")
+            last_command_time = time.time()  # Reset timer after stopping
+        time.sleep(1)
+
+# Start the timeout monitor in a separate thread
+timeout_thread = threading.Thread(target=monitor_timeout, args=(5,), daemon=True)
+timeout_thread.start()
+
+# -------------------------------
+# New Helper Functions for Additional Commands
+# -------------------------------
+def move_forward():
+    send_motor_command("move_forward")
+
+def move_backward():
+    send_motor_command("move_backward")
+
+def stop_motors():
+    send_motor_command("stop")
+
+# -------------------------------
+# Global Variables and Locks
+# -------------------------------
+global_occupancy_map = None
+global_occupancy_config = None
+grid_lock = threading.Lock()
+
+selected_start = None
+selected_goal = None
+scale_factor = 20
+
+# Global robot pose [x, y, theta] in meters, radians
+robot_pose = [1.0, 1.0, 0.0]
+pose_lock = threading.Lock()
+
+# For visual odometry: store previous frames
+prev_color = None
+prev_depth = None
+
+# -------------------------------
+# YOLO & HSV Object Detection Setup
+# -------------------------------
+bin_model = YOLO('model/best.pt')
+TRASH_COLORS = {
+    'plastic': {'lower': np.array([0, 100, 100]), 'upper': np.array([10, 255, 255])},
+    'glass':   {'lower': np.array([20, 100, 100]), 'upper': np.array([30, 255, 255])},
+    'metal':   {'lower': np.array([100, 100, 100]), 'upper': np.array([130, 255, 255])},
+    'brown':   {'lower': np.array([10, 100, 100]), 'upper': np.array([20, 255, 255])}
+}
+BIN_CATEGORIES = {
+    'plastic_bin': 'plastic',
+    'glass_bin': 'glass',
+    'metal_bin': 'metal'
+}
+
+# -------------------------------
+# Object Detection Functions (YOLO & HSV)
+# -------------------------------
+def process_frame(frame):
+    """Run YOLO for bin detection and HSV segmentation for trash detection."""
+    bin_results = bin_model(frame)
+    bins_out = []
+    for result in bin_results:
+        for box in result.boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+            conf = box.conf[0].item()
+            class_id = int(box.cls[0].item())
+            class_name = bin_model.names[class_id]
+            bins_out.append({
+                'bbox': [x1, y1, x2, y2],
+                'confidence': conf,
+                'class_name': class_name
+            })
+    trash_out = []
+    hsv_image = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    for t_type, color_range in TRASH_COLORS.items():
+        mask = cv2.inRange(hsv_image, color_range['lower'], color_range['upper'])
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            if cv2.contourArea(cnt) > 100:
+                x, y, w, h = cv2.boundingRect(cnt)
+                trash_out.append({
+                    'bbox': [x, y, x+w, y+h],
+                    'class_name': t_type,
+                    'confidence': 1.0
+                })
+    return {'bins': bins_out, 'trash': trash_out}
+
+def compute_distance_from_bbox(bbox, depth_image):
+    x1, y1, x2, y2 = bbox
+    x1 = max(0, x1)
+    y1 = max(0, y1)
+    x2 = min(depth_image.shape[1], x2)
+    y2 = min(depth_image.shape[0], y2)
+    if x2 <= x1 or y2 <= y1:
+        return None
+    region = depth_image[y1:y2, x1:x2]
+    if region.size == 0:
+        return None
+    return float(np.mean(region))
+
+def visualize_detections(frame, results, depth_image):
+    for det in results['bins']:
+        x1, y1, x2, y2 = det['bbox']
+        distance = compute_distance_from_bbox(det['bbox'], depth_image)
+        distance_str = f"{distance:.2f}m" if distance is not None else "N/A"
+        label = f"{det['class_name']} {det['confidence']:.2f} {distance_str}"
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
+        cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+    for det in results['trash']:
+        x1, y1, x2, y2 = det['bbox']
+        distance = compute_distance_from_bbox(det['bbox'], depth_image)
+        distance_str = f"{distance:.2f}m" if distance is not None else "N/A"
+        label = f"{det['class_name']} {det['confidence']:.2f} {distance_str}"
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+    return frame
+
+# -------------------------------
+# Helper Functions for Coordinate Transformation
+# -------------------------------
+def get_trash_target(results):
+    if results['trash']:
+        best = max(results['trash'], key=lambda r: (r['bbox'][2]-r['bbox'][0])*(r['bbox'][3]-r['bbox'][1]))
+        x1, y1, x2, y2 = best['bbox']
+        cx = (x1 + x2) // 2
+        cy = (y1 + y2) // 2
+        return (cx, cy)
+    return None
+
+def pixel_to_world(pixel, depth_image, intrinsics):
+    u, v = pixel
+    d = depth_image[v, u]
+    if d == 0:
+        return None
+    x = (u - intrinsics.ppx) * d / intrinsics.fx
+    y = (v - intrinsics.ppy) * d / intrinsics.fy
+    return (x, y)
+
+def transform_to_global(local_point, robot_pose):
+    x_local, y_local = local_point
+    with pose_lock:
+        x_robot, y_robot, theta = robot_pose
+    cos_theta = math.cos(theta)
+    sin_theta = math.sin(theta)
+    global_x = cos_theta * x_local - sin_theta * y_local + x_robot
+    global_y = sin_theta * x_local + cos_theta * y_local + y_robot
+    return (global_x, global_y)
+
+# -------------------------------
+# Occupancy Grid Mapping Helper Functions (Numba Accelerated)
+# -------------------------------
+EXTEND_AREA = 1.0
+
+@njit
+def bresenham(start, end):
+    x1, y1 = start[0], start[1]
+    x2, y2 = end[0], end[1]
+    dx = x2 - x1
+    dy = y2 - y1
+    is_steep = abs(dy) > abs(dx)
+    if is_steep:
+        x1, y1 = y1, x1
+        x2, y2 = y2, x2
+    swapped = False
+    if x1 > x2:
+        x1, x2 = x2, x1
+        y1, y2 = y2, y1
+        swapped = True
+    dx = x2 - x1
+    dy = y2 - y1
+    error = dx / 2.0
+    y_step = 1 if y1 < y2 else -1
+    y = y1
+    points = []
+    for x in range(x1, x2 + 1):
+        if is_steep:
+            points.append((y, x))
+        else:
+            points.append((x, y))
+        error -= abs(dy)
+        if error < 0:
+            y += y_step
+            error += dx
+    if swapped:
+        points.reverse()
+    return np.array(points)
+
+@njit
+def calc_grid_map_config(ox, oy, xy_resolution):
+    min_x = round(np.min(ox) - EXTEND_AREA / 2.0)
+    min_y = round(np.min(oy) - EXTEND_AREA / 2.0)
+    max_x = round(np.max(ox) + EXTEND_AREA / 2.0)
+    max_y = round(np.max(oy) + EXTEND_AREA / 2.0)
+    xw = int(round((max_x - min_x) / xy_resolution))
+    yw = int(round((max_y - min_y) / xy_resolution))
+    return min_x, min_y, max_x, max_y, xw, yw
+
+@njit
+def generate_ray_casting_grid_map(ox, oy, xy_resolution):
+    min_x, min_y, max_x, max_y, x_w, y_w = calc_grid_map_config(ox, oy, xy_resolution)
+    occupancy_map = np.full((x_w, y_w), 0.5)
+    center_x = int(round(-min_x / xy_resolution))
+    center_y = int(round(-min_y / xy_resolution))
+    
+    for i in range(len(ox)):
+        ix = int(round((ox[i] - min_x) / xy_resolution))
+        iy = int(round((oy[i] - min_y) / xy_resolution))
+        if ix < 0:
+            ix = 0
+        if iy < 0:
+            iy = 0
+        if ix >= x_w:
+            ix = x_w - 1
+        if iy >= y_w:
+            iy = y_w - 1
+        ray_cells = bresenham((center_x, center_y), (ix, iy))
+        for j in range(ray_cells.shape[0]):
+            cx = ray_cells[j, 0]
+            cy = ray_cells[j, 1]
+            if cx < 0:
+                cx = 0
+            if cy < 0:
+                cy = 0
+            if cx >= x_w:
+                cx = x_w - 1
+            if cy >= y_w:
+                cy = y_w - 1
+            occupancy_map[cx, cy] = 0.0
+        occupancy_map[ix, iy] = 1.0
+        if ix + 1 < x_w and iy + 1 < y_w:
+            occupancy_map[ix + 1, iy] = 1.0
+            occupancy_map[ix, iy + 1] = 1.0
+            occupancy_map[ix + 1, iy + 1] = 1.0
+    return occupancy_map, min_x, max_x, min_y, max_y, xy_resolution
+
+def threshold_occupancy_map(occ_map, threshold=0.7):
+    binary_map = (occ_map >= threshold).astype(np.int32)
+    return binary_map
+
+def global_to_grid(coord, min_x, min_y, xy_resolution):
+    x, y = coord
+    grid_x = int(round((x - min_x) / xy_resolution))
+    grid_y = int(round((y - min_y) / xy_resolution))
+    return grid_x, grid_y
+
+def grid_to_global(cell, min_x, min_y, xy_resolution):
+    grid_x, grid_y = cell
+    x = min_x + (grid_x + 0.5) * xy_resolution
+    y = min_y + (grid_y + 0.5) * xy_resolution
+    return (x, y)
+
+def astar(start, goal, grid):
+    neighbors = [(0, 1), (1, 0), (0, -1), (-1, 0)]
+    close_set = set()
+    came_from = {}
+    gscore = {start: 0}
+    fscore = {start: math.hypot(goal[0]-start[0], goal[1]-start[1])}
+    open_heap = []
+    heapq.heappush(open_heap, (fscore[start], start))
+    
+    while open_heap:
+        current = heapq.heappop(open_heap)[1]
+        if current == goal:
+            path = [current]
+            while current in came_from:
+                current = came_from[current]
+                path.append(current)
+            return path[::-1]
+        
+        close_set.add(current)
+        for dx, dy in neighbors:
+            neighbor = (current[0] + dx, current[1] + dy)
+            tentative_g_score = gscore[current] + 1
+            if (0 <= neighbor[0] < grid.shape[0] and 0 <= neighbor[1] < grid.shape[1]):
+                if grid[neighbor[0]][neighbor[1]] == 1:
+                    continue
+            else:
+                continue
+            
+            if neighbor in close_set and tentative_g_score >= gscore.get(neighbor, 0):
+                continue
+            
+            if tentative_g_score < gscore.get(neighbor, float('inf')) or neighbor not in [i[1] for i in open_heap]:
+                came_from[neighbor] = current
+                gscore[neighbor] = tentative_g_score
+                fscore[neighbor] = tentative_g_score + math.hypot(goal[0]-neighbor[0], goal[1]-neighbor[1])
+                heapq.heappush(open_heap, (fscore[neighbor], neighbor))
+    return []
+
+def visualize_path(binary_map, path, scale=20):
+    occ_img = (binary_map * 255).astype(np.uint8)
+    occ_img = cv2.resize(occ_img, (binary_map.shape[1]*scale, binary_map.shape[0]*scale), interpolation=cv2.INTER_NEAREST)
+    occ_img = cv2.cvtColor(occ_img, cv2.COLOR_GRAY2BGR)
+    for cell in path:
+        col = cell[1] * scale
+        row = cell[0] * scale
+        cv2.rectangle(occ_img, (col, row), (col+scale, row+scale), (0, 0, 255), -1)
+    cv2.putText(occ_img, "Occupancy Grid", (5, 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+    return occ_img
+
+# -------------------------------
+# New Visual Odometry Function with Debug Visualization and Error Handling
+# -------------------------------
+def new_visual_odometry(prev_img, curr_img, depth_prev, intrinsics, detector='orb', filter_match_distance=0.4, return_matches=False):
+    """
+    Compute the relative camera motion between prev_img and curr_img.
+    Uses ORB (or SIFT) to detect keypoints, applies Lowe's ratio test, then uses depth from the previous frame
+    to build 3D-2D correspondences and estimates motion using PnP with RANSAC.
+    If DEBUG_VO is enabled, returns additional match information for visualization.
+    """
+    prev_gray = cv2.cvtColor(prev_img, cv2.COLOR_BGR2GRAY)
+    curr_gray = cv2.cvtColor(curr_img, cv2.COLOR_BGR2GRAY)
+    
+    if detector == 'sift':
+        det = cv2.SIFT_create()
+    else:
+        det = cv2.ORB_create(1000)
+    
+    kp1, des1 = det.detectAndCompute(prev_gray, None)
+    kp2, des2 = det.detectAndCompute(curr_gray, None)
+    
+    if des1 is None or des2 is None:
+        print("[VO DEBUG] Not enough descriptors found.")
+        return (None, None, None, None, None) if return_matches else (None, None)
+    
+    if detector == 'sift':
+        matcher = cv2.BFMatcher(cv2.NORM_L2)
+    else:
+        matcher = cv2.BFMatcher(cv2.NORM_HAMMING)
+    raw_matches = matcher.knnMatch(des1, des2, k=2)
+    
+    good_matches = []
+    for m, n in raw_matches:
+        if m.distance < filter_match_distance * n.distance:
+            good_matches.append(m)
+    
+    if len(good_matches) < 10:
+        print(f"[VO DEBUG] Not enough good matches: {len(good_matches)}")
+        return (None, None, None, None, None) if return_matches else (None, None)
+    
+    object_points = []
+    image_points = []
+    for m in good_matches:
+        u, v = kp1[m.queryIdx].pt
+        z = depth_prev[int(v), int(u)]
+        if z == 0:
+            continue
+        x = (u - intrinsics.ppx) * z / intrinsics.fx
+        y = (v - intrinsics.ppy) * z / intrinsics.fy
+        object_points.append([x, y, z])
+        image_points.append(kp2[m.trainIdx].pt)
+    
+    if len(object_points) < 10:
+        print("[VO DEBUG] Not enough 3D-2D correspondences.")
+        return (None, None, None, None, None) if return_matches else (None, None)
+    
+    object_points = np.array(object_points, dtype=np.float32)
+    image_points = np.array(image_points, dtype=np.float32)
+    
+    K = np.array([[intrinsics.fx, 0, intrinsics.ppx],
+                  [0, intrinsics.fy, intrinsics.ppy],
+                  [0, 0, 1]], dtype=np.float32)
+    
+    success, rvec, tvec, inliers = cv2.solvePnPRansac(object_points, image_points, K, None)
+    if not success or rvec is None or tvec is None:
+        print("[VO DEBUG] PnP failed.")
+        return (None, None, None, None, None) if return_matches else (None, None)
+    
+    R, _ = cv2.Rodrigues(rvec)
+    
+    if np.linalg.norm(tvec) > VO_TRANSLATION_MAX:
+        print(f"[VO DEBUG] Translation {np.linalg.norm(tvec):.2f}m exceeds threshold.")
+        return (None, None, None, None, None) if return_matches else (None, None)
+    
+    if np.linalg.norm(tvec) < 1e-3:
+        tvec = np.zeros_like(tvec)
+        R = np.eye(3)
+    
+    if return_matches:
+        return R, tvec, kp1, kp2, good_matches
+    else:
+        return R, tvec
+
+# -------------------------------
+# Update Robot Pose Function (with logging)
+# -------------------------------
+def update_robot_pose(R, t, alpha=0.7):
+    global robot_pose
+    with pose_lock:
+        x, y, theta = robot_pose
+    t_x = t[0][0]
+    t_y = t[1][0]
+    new_x = x + (math.cos(theta) * t_x - math.sin(theta) * t_y)
+    new_y = y + (math.sin(theta) * t_x + math.cos(theta) * t_y)
+    delta_theta = math.atan2(R[1, 0], R[0, 0])
+    new_theta = theta + delta_theta
+    filtered_x = alpha * new_x + (1 - alpha) * x
+    filtered_y = alpha * new_y + (1 - alpha) * y
+    filtered_theta = alpha * new_theta + (1 - alpha) * theta
+    with pose_lock:
+        robot_pose = [filtered_x, filtered_y, filtered_theta]
+    print(f"[POSE UPDATE] Pose updated to: {robot_pose}")
+    return robot_pose
+
+# -------------------------------
+# Additional Object Detection Functions for Trash
+# -------------------------------
+def detect_trash(frame):
+    hsv_image = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+    trash_results = []
+    for t_type, color_range in TRASH_COLORS.items():
+        mask = cv2.inRange(hsv_image, color_range['lower'], color_range['upper'])
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        for cnt in contours:
+            if cv2.contourArea(cnt) > 100:
+                x, y, w, h = cv2.boundingRect(cnt)
+                trash_results.append({
+                    'bbox': [x, y, x+w, y+h],
+                    'class_name': t_type,
+                    'confidence': 1.0
+                })
+    return trash_results
+
+def process_frame_trash(frame):
+    trash_out = detect_trash(frame)
+    return {'trash': trash_out}
+
+# -------------------------------
+# Navigation Functions
+# -------------------------------
+def decide_motor_command(current_pose, waypoint, angle_threshold=0.2, distance_threshold=0.3):
+    """
+    Decide the motor command based on the current pose and the desired waypoint.
+    - If the waypoint is within the distance threshold, command to "stop".
+    - If the waypoint is behind the robot (angle difference > 90°), command "move_backward".
+    - Otherwise, if the angle difference exceeds the threshold, command a turn.
+    - Else, command "move_forward".
+    """
+    dx = waypoint[0] - current_pose[0]
+    dy = waypoint[1] - current_pose[1]
+    distance = math.sqrt(dx**2 + dy**2)
+    if distance < distance_threshold:
+        return "stop"
+    desired_angle = math.atan2(dy, dx)
+    angle_diff = desired_angle - current_pose[2]
+    angle_diff = (angle_diff + math.pi) % (2 * math.pi) - math.pi
+    if abs(angle_diff) > math.pi / 2:
+        return "move_backward"
+    elif abs(angle_diff) > angle_threshold:
+        return "turn_left" if angle_diff > 0 else "turn_right"
+    else:
+        return "move_forward"
+
+def follow_path(path, min_x, min_y, xy_resolution):
+    with pose_lock:
+        current_pose_copy = robot_pose.copy()
+    next_cell = path[1] if len(path) > 1 else path[0]
+    waypoint = grid_to_global(next_cell, min_x, min_y, xy_resolution)
+    command = decide_motor_command(current_pose_copy, waypoint)
+    send_motor_command(command)
+    print(f"[PATH FOLLOW] Pose: {current_pose_copy}, Waypoint: {waypoint}, Command: {command}")
+
+def autonomous_wander(laser_scan, width):
+    central_region = laser_scan[width // 2 - 10: width // 2 + 10]
+    if np.min(central_region) < 0.5:
+        send_motor_command("turn_left")
+        print("[WANDER] Obstacle detected, turning left.")
+    else:
+        send_motor_command("move_forward")
+        print("[WANDER] Clear path, moving forward.")
+
+# -------------------------------
+# Occupancy Grid Update Worker (with debug logging)
+# -------------------------------
+def occupancy_grid_worker(angles_sensor, laser_scan, xy_resolution, robot_pose):
+    global global_occupancy_map, global_occupancy_config
+    local_x = np.sin(angles_sensor) * laser_scan
+    local_y = np.cos(angles_sensor) * laser_scan
+    theta = robot_pose[2]
+    cos_theta = math.cos(theta)
+    sin_theta = math.sin(theta)
+    global_x = cos_theta * local_x - sin_theta * local_y + robot_pose[0]
+    global_y = sin_theta * local_x + cos_theta * local_y + robot_pose[1]
+    occ_map, min_x, max_x, min_y, max_y, res = generate_ray_casting_grid_map(global_x, global_y, xy_resolution)
+    with grid_lock:
+        global_occupancy_map = occ_map
+        global_occupancy_config = (min_x, max_x, min_y, max_y, res)
+    print(f"[GRID UPDATE] Grid updated: bounds=({min_x}, {min_y}) to ({max_x}, {max_y}), resolution={res}")
+
+# -------------------------------
+# Main Function: Integrated System with Parallel Processing
+# -------------------------------
+def main():
+    global robot_pose, prev_color, prev_depth
+    pipeline = rs.pipeline()
+    config = rs.config()
+    config.enable_stream(rs.stream.color, 640, 480, rs.format.bgr8, 30)
+    config.enable_stream(rs.stream.depth, 640, 480, rs.format.z16, 30)
+    profile = pipeline.start(config)
+    
+    # Align depth to color frame
+    align = rs.align(rs.stream.color)
+    
+    depth_sensor = profile.get_device().first_depth_sensor()
+    depth_scale = depth_sensor.get_depth_scale()
+    print("Depth Scale is:", depth_scale)
+    
+    depth_profile = profile.get_stream(rs.stream.depth).as_video_stream_profile()
+    intrinsics = depth_profile.get_intrinsics()
+    width = intrinsics.width
+    height = intrinsics.height
+    fx = intrinsics.fx
+    cx = intrinsics.ppx
+    
+    horizontal_fov = 2 * math.atan(width / (2 * fx))
+    print("Horizontal FOV (radians):", horizontal_fov)
+    
+    xy_resolution = 0.1  # 0.1 m per cell
+    
+    cv2.namedWindow("Color Image", cv2.WINDOW_AUTOSIZE)
+    cv2.namedWindow("Depth Image", cv2.WINDOW_AUTOSIZE)
+    cv2.namedWindow("Simulated Laser Scan", cv2.WINDOW_AUTOSIZE)
+    cv2.namedWindow("Occupancy Grid Map", cv2.WINDOW_AUTOSIZE)
+    cv2.namedWindow("Planned Path", cv2.WINDOW_AUTOSIZE)
+    
+    max_valid_range = 7.0  # meters
+    frame_count = 0
+    variance_threshold = 0.01  # adjust as needed
+    
+    with pose_lock:
+        robot_pose = [1.0, 1.0, 0.0]
+    prev_color = None
+    prev_depth = None
+    
+    # Create a ThreadPoolExecutor for heavy tasks
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        try:
+            while True:
+                frames = pipeline.wait_for_frames()
+                frames = align.process(frames)
+                color_frame = frames.get_color_frame()
+                depth_frame = frames.get_depth_frame()
+                if not color_frame or not depth_frame:
+                    continue
+                
+                color_image = np.asanyarray(color_frame.get_data())
+                depth_image = np.asanyarray(depth_frame.get_data()) * depth_scale
+                
+                depth_normalized = (depth_image / np.max(depth_image) * 255).astype(np.uint8)
+                depth_colormap = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
+                cv2.imshow("Color Image", color_image)
+                cv2.imshow("Depth Image", depth_colormap)
+                
+                band_height = 10
+                band_top = height // 2 - band_height // 2
+                band_bottom = height // 2 + band_height // 2
+                roi_band = depth_image[band_top:band_bottom, :]
+                laser_scan = np.median(roi_band, axis=0)
+                laser_scan = np.clip(laser_scan, 0, max_valid_range)
+                angles_sensor = np.array([math.atan((col - cx) / fx) for col in range(width)])
+                scan_vis = np.zeros((400, width, 3), dtype=np.uint8)
+                for col, r in enumerate(laser_scan):
+                    line_length = int((1 - r / max_valid_range) * 400)
+                    cv2.line(scan_vis, (col, 400), (col, 400 - line_length), (0, 255, 0), 1)
+                cv2.imshow("Simulated Laser Scan", scan_vis)
+                
+                # --- Visual Odometry using New Function with Debug/Fallback ---
+                if prev_color is not None and prev_depth is not None:
+                    result = new_visual_odometry(prev_color, color_image, prev_depth, intrinsics,
+                                                 detector='orb', filter_match_distance=0.4, return_matches=DEBUG_VO)
+                    if result[0] is not None:
+                        if DEBUG_VO and len(result) == 5:
+                            R, t, kp1, kp2, good_matches = result
+                            match_img = cv2.drawMatches(prev_color, kp1, color_image, kp2, good_matches, None, flags=2)
+                            cv2.imshow("VO Matches", match_img)
+                        else:
+                            R, t = result
+                        if np.linalg.norm(t) < VO_TRANSLATION_MAX:
+                            update_robot_pose(R, t)
+                        else:
+                            print("[VO ERROR] Translation too large, skipping update.")
+                    else:
+                        print("[VO ERROR] VO update failed.")
+                prev_color = color_image.copy()
+                prev_depth = depth_image.copy()
+                
+                # --- Submit YOLO Detection Task ---
+                future_detection = executor.submit(process_frame, color_image.copy())
+                
+                # --- Object Detection and Visualization ---
+                det_results = future_detection.result()
+                vis_frame = visualize_detections(color_image.copy(), det_results, depth_image)
+                cv2.imshow("Color Image", vis_frame)
+                
+                if det_results['trash']:
+                    best_trash = max(det_results['trash'], key=lambda r: (r['bbox'][2]-r['bbox'][0])*(r['bbox'][3]-r['bbox'][1]))
+                    distance = compute_distance_from_bbox(best_trash['bbox'], depth_image)
+                    print(f"[TRASH DETECTION] Distance to detected trash: {distance:.2f}m")
+                
+                trash_pixel = get_trash_target(det_results)
+                if trash_pixel is not None:
+                    cv2.circle(vis_frame, trash_pixel, 10, (0, 0, 255), 2)
+                    cv2.imshow("Color Image", vis_frame)
+                    local_point = pixel_to_world(trash_pixel, depth_image, intrinsics)
+                    if local_point is not None:
+                        global_target = transform_to_global(local_point, robot_pose)
+                        print("[TARGET] Global trash target:", global_target)
+                        if global_occupancy_config is not None:
+                            min_x_occ, max_x_occ, min_y_occ, max_y_occ, res = global_occupancy_config
+                            goal_cell = global_to_grid(global_target, min_x_occ, min_y_occ, res)
+                            with pose_lock:
+                                start_global = (robot_pose[0], robot_pose[1])
+                            start_cell = global_to_grid(start_global, min_x_occ, min_y_occ, res)
+                            with grid_lock:
+                                binary_map = threshold_occupancy_map(global_occupancy_map, threshold=0.7)
+                            path = astar(start_cell, goal_cell, binary_map)
+                            if path:
+                                path_vis = visualize_path(binary_map, path, scale=scale_factor)
+                                cv2.imshow("Planned Path", path_vis)
+                                follow_path(path, min_x_occ, min_y_occ, res)
+                            else:
+                                print("[PATH PLANNING] No valid path found for trash target")
+                    else:
+                        print("[TARGET] local_point is None, skipping trash target")
+                else:
+                    autonomous_wander(laser_scan, width)
+                
+                # --- Submit Occupancy Grid Update Task periodically ---
+                laser_variance = np.var(laser_scan)
+                update_interval = 1 if laser_variance > variance_threshold else 10
+                if frame_count % update_interval == 0:
+                    executor.submit(occupancy_grid_worker, angles_sensor.copy(), laser_scan.copy(), xy_resolution, robot_pose.copy())
+                
+                with grid_lock:
+                    if global_occupancy_map is not None:
+                        occ_img = (global_occupancy_map * 255).astype(np.uint8)
+                        occ_img = cv2.resize(occ_img, (400, 400), interpolation=cv2.INTER_NEAREST)
+                        occ_img = visualize_path(occ_img, [], scale=1)
+                        cv2.imshow("Occupancy Grid Map", occ_img)
+                        if global_occupancy_config is not None and trash_pixel is not None:
+                            min_x_occ, max_x_occ, min_y_occ, max_y_occ, res = global_occupancy_config
+                            with pose_lock:
+                                start_global = (robot_pose[0], robot_pose[1])
+                            start_cell = global_to_grid(start_global, min_x_occ, min_y_occ, res)
+                            local_pt = pixel_to_world(trash_pixel, depth_image, intrinsics)
+                            if local_pt is None:
+                                print("[GRID DEBUG] local_point is None during occupancy update; skipping")
+                            else:
+                                global_target = transform_to_global(local_pt, robot_pose)
+                                goal_cell = global_to_grid(global_target, min_x_occ, min_y_occ, res)
+                                binary_map = threshold_occupancy_map(global_occupancy_map, threshold=0.7)
+                                path = astar(start_cell, goal_cell, binary_map)
+                                if path:
+                                    path_vis = visualize_path(binary_map, path, scale=scale_factor)
+                                    cv2.imshow("Planned Path", path_vis)
+                                    follow_path(path, min_x_occ, min_y_occ, res)
+                                else:
+                                    print("[GRID DEBUG] No valid path found between start and trash target")
+                
+                key = cv2.waitKey(1) & 0xFF
+                if key == 27:
+                    break
+                
+                frame_count += 1
+        finally:
+            pipeline.stop()
+            cv2.destroyAllWindows()
+
+if __name__ == '__main__':
+    main()
