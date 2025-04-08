@@ -40,13 +40,12 @@ last_command_time = time.time()  # Global timestamp for the last command.
 
 def send_motor_command(command):
     """
-    Send a command string to the Arduino (or simulate it), enforcing a 1-second delay
-    between commands.
+    Send a command string to the Arduino (or simulate it), enforcing a 1-second delay between commands.
     """
     global last_command_time
     elapsed = time.time() - last_command_time
-    if elapsed < 1:
-        time.sleep(1 - elapsed)
+    if elapsed < 3:
+        time.sleep(3 - elapsed)
     print("Sending command:", command)
     last_command_time = time.time()
     if USE_ARDUINO and arduino is not None:
@@ -79,7 +78,7 @@ def execute_motor_command(command):
     """
     stop_motors()         # Stop any current motion.
     time.sleep(1)         # Wait 1 second to ensure complete stop.
-    send_motor_command(command)  # Send the new command.
+    send_motor_command(command)  # Now send the new command.
 
 def move_forward():
     execute_motor_command("move_forward")
@@ -128,7 +127,7 @@ BIN_CATEGORIES = {
 def process_frame(frame):
     """
     Run YOLO for bin detection and HSV segmentation for trash detection.
-    For bin detections, if the confidence is below 60% (i.e. 0.6),
+    For bin detections, if the confidence is below 60% (i.e., 0.6),
     classify the detection as an "obstacle".
     """
     bin_results = bin_model(frame)
@@ -139,8 +138,8 @@ def process_frame(frame):
             conf = box.conf[0].item()
             class_id = int(box.cls[0].item())
             class_name = bin_model.names[class_id]
-            # If confidence is below 60% (i.e. 0.6), reclassify as obstacle.
-            if conf < 0.6:
+            # Reclassify if confidence is below 0.6.
+            if conf < 0.8:
                 class_name = "obstacle"
             bins_out.append({
                 'bbox': [x1, y1, x2, y2],
@@ -513,7 +512,7 @@ def process_frame_trash(frame):
 # -------------------------------
 # Navigation Functions
 # -------------------------------
-def decide_motor_command(current_pose, waypoint, angle_threshold=0.2, distance_threshold=0.3):
+def decide_motor_command(current_pose, waypoint, angle_threshold=0.2, distance_threshold=0.1):
     """
     Decide the motor command based on the current pose and the desired waypoint.
     - If the waypoint is within distance_threshold, command "stop".
@@ -542,7 +541,7 @@ def follow_path(path, min_x, min_y, xy_resolution):
     next_cell = path[1] if len(path) > 1 else path[0]
     waypoint = grid_to_global(next_cell, min_x, min_y, xy_resolution)
     command = decide_motor_command(current_pose_copy, waypoint)
-    # Use the safe command execution: first stop then execute the command.
+    # Use the safe command execution: stop first then execute the new command.
     execute_motor_command(command)
     print(f"[PATH FOLLOW] Pose: {current_pose_copy}, Waypoint: {waypoint}, Command: {command}")
 
@@ -566,7 +565,7 @@ def occupancy_grid_worker(angles_sensor, laser_scan, xy_resolution, robot_pose):
     cos_theta = math.cos(theta)
     sin_theta = math.sin(theta)
     global_x = cos_theta * local_x - sin_theta * local_y + robot_pose[0]
-    global_y = sin_theta * local_y + cos_theta * local_y + robot_pose[1]  # Note: Verify if this is intended.
+    global_y = sin_theta * local_y + cos_theta * local_y + robot_pose[1]  # Note: Verify this calculation if needed.
     occ_map, min_x, max_x, min_y, max_y, res = generate_ray_casting_grid_map(global_x, global_y, xy_resolution)
     with grid_lock:
         global_occupancy_map = occ_map
@@ -635,7 +634,7 @@ def main():
                 depth_normalized = (depth_image / np.max(depth_image) * 255).astype(np.uint8)
                 depth_colormap = cv2.applyColorMap(depth_normalized, cv2.COLORMAP_JET)
                 cv2.imshow("Color Image", color_image)
-                cv2.imshow("Depth Image", depth_colormap)
+                #cv2.imshow("Depth Image", depth_colormap)
                 
                 band_height = 10
                 band_top = height // 2 - band_height // 2
@@ -644,11 +643,11 @@ def main():
                 laser_scan = np.median(roi_band, axis=0)
                 laser_scan = np.clip(laser_scan, 0, max_valid_range)
                 angles_sensor = np.array([math.atan((col - cx) / fx) for col in range(width)])
-                scan_vis = np.zeros((400, width, 3), dtype=np.uint8)
+                scan_vis = np.zeros((400, width, 3), dtype=np.uint8)	
                 for col, r in enumerate(laser_scan):
                     line_length = int((1 - r / max_valid_range) * 400)
                     cv2.line(scan_vis, (col, 400), (col, 400 - line_length), (0, 255, 0), 1)
-                cv2.imshow("Simulated Laser Scan", scan_vis)
+                #cv2.imshow("Simulated Laser Scan", scan_vis)
                 
                 # --- Visual Odometry using New Function with Debug/Fallback ---
                 if prev_color is not None and prev_depth is not None:
@@ -658,7 +657,7 @@ def main():
                         if DEBUG_VO and len(result) == 5:
                             R, t, kp1, kp2, good_matches = result
                             match_img = cv2.drawMatches(prev_color, kp1, color_image, kp2, good_matches, None, flags=2)
-                            cv2.imshow("VO Matches", match_img)
+                            #cv2.imshow("VO Matches", match_img)
                         else:
                             R, t = result
                         if np.linalg.norm(t) < VO_TRANSLATION_MAX:
@@ -684,12 +683,10 @@ def main():
                         valid_trash.append(trash)
                 
                 if valid_trash:
-                    # Choose the largest trash detection (by bounding box area)
                     best_trash = max(valid_trash, key=lambda r: (r['bbox'][2] - r['bbox'][0]) * (r['bbox'][3] - r['bbox'][1]))
                     distance = compute_distance_from_bbox(best_trash['bbox'], depth_image)
                     print(f"[TRASH DETECTION] Distance to detected trash: {distance:.2f}m")
                     
-                    # Get the trash target pixel using the helper function.
                     trash_pixel = get_trash_target(det_results, depth_image)
                     if trash_pixel is not None:
                         cv2.circle(vis_frame, trash_pixel, 10, (0, 0, 255), 2)
@@ -711,7 +708,13 @@ def main():
                             if path:
                                 path_vis = visualize_path(binary_map, path, scale=scale_factor)
                                 cv2.imshow("Planned Path", path_vis)
-                                follow_path(path, min_x_occ, min_y_occ, res)
+                                # For trash target, override the stop command if reached.
+                                next_cell = path[1] if len(path) > 1 else path[0]
+                                waypoint = grid_to_global(next_cell, min_x_occ, min_y_occ, res)
+                                command = decide_motor_command(robot_pose, waypoint, distance_threshold=0.0)
+                                if command == "stop":
+                                    command = "move_forward"
+                                execute_motor_command(command)
                             else:
                                 print("[PATH PLANNING] No valid path found for trash target")
                         else:
@@ -720,7 +723,6 @@ def main():
                         print("[TARGET] No valid trash target found within 1 meter, wandering.")
                         autonomous_wander(laser_scan, width)
                 else:
-                    # No trash detection within threshold; just wander.
                     autonomous_wander(laser_scan, width)
                 
                 # --- Submit Occupancy Grid Update Task periodically ---
